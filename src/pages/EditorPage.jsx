@@ -3,28 +3,90 @@ import Client from "../components/Client";
 import Editor from "../components/Editor";
 import { initSocket } from "../socket";
 import ACTIONS from "../../Actions";
-import { useLocation } from "react-router-dom";
+import {
+  useLocation,
+  useNavigate,
+  Navigate,
+  useParams,
+} from "react-router-dom";
+import toast from "react-hot-toast";
 
 const EditorPage = () => {
-  const location = useLocation();
+  const [clients, setClients] = useState([]);
 
+  const location = useLocation();
+  const reactNavigator = useNavigate();
+  const { roomId } = useParams();
+  // console.log(params)
   const socketRef = useRef(null);
   useEffect(() => {
     const init = async () => {
-      socketRef.current = await initSocket();
-      socketRef.current.on("connect", () => {
-        console.log("Connected to server:", socketRef.current.id);
+      // Disconnect existing socket first (safety)
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+
+      const socket = await initSocket();
+      socketRef.current = socket;
+
+      // Debug all events
+      socket.onAny((event, ...args) => {
+        console.log("📩 Event received:", event, args);
+      });
+
+      // Handle connection errors
+      const handleErrors = (e) => {
+        console.log("socket error", e);
+        toast.error("Socket connection failed, try again");
+        reactNavigator("/");
+      };
+      socket.on("connect_error", handleErrors);
+      socket.on("connect_failed", handleErrors);
+
+      // ✅ Register listener before emitting JOIN
+      socket.on(ACTIONS.JOINED, ({ clients, username, socketId }) => {
+        if (username !== location.state?.username) {
+          toast.success(`${username} joined the room`);
+          console.log(`${username} joined with id ${socketId}`);
+        }
+
+        // Deduplicate clients
+        const uniqueClients = Array.from(
+          new Map(clients.map((c) => [c.socketId, c])).values()
+        );
+        setClients(uniqueClients);
+      });
+
+      //Listening for disconnected
+      socketRef.current.on(ACTIONS.DISCONNECTED, ({socketId, username})=>{
+        toast.success(`${username} left the room`)
+        setClients((prev)=>{
+          return prev.filter(client => client.socketId != socketId)
+        })
+      })
+
+      // Emit join
+      socket.emit(ACTIONS.JOIN, {
+        roomId,
+        username: location.state?.username,
       });
     };
+
     init();
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current.off(ACTIONS.JOINED)
+        socketRef.current.off(ACTIONS.DISCONNECTED)
+        console.log("🔌 Disconnected socket on unmount");
+      }
+    };
   }, []);
-  const [clients, setClients] = useState([
-    { socketId: 1, username: "Amanat" },
-    { socketId: 2, username: "Zilly" },
-    { socketId: 2, username: "Zilly" },
-    { socketId: 2, username: "Zilly" },
-    { socketId: 2, username: "Zilly" },
-  ]);
+
+  if (!location.state) {
+    return <Navigate to="/" />;
+  }
   return (
     <div className="bg-[#1c1e29] h-screen grid grid-cols-[230px_1fr]">
       <div className="bg-[#1c1e29] p-[16px] text-white h-full flex flex-col justify-between">
