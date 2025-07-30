@@ -12,11 +12,13 @@ import {
 import toast from "react-hot-toast";
 
 const EditorPage = () => {
+  // const [socketReady, setSocketReady] = useState(false);
   const [clients, setClients] = useState([]);
 
   const location = useLocation();
   const reactNavigator = useNavigate();
   const { roomId } = useParams();
+  const codeRef = useRef(null);
   // console.log(params)
   const socketRef = useRef(null);
   useEffect(() => {
@@ -28,13 +30,10 @@ const EditorPage = () => {
 
       const socket = await initSocket();
       socketRef.current = socket;
-
-      // Debug all events
-      socket.onAny((event, ...args) => {
-        console.log("📩 Event received:", event, args);
+      socket.on("connect", () => {
+        // setSocketReady(true); // ✅ Render editor only after socket connects
       });
 
-      // Handle connection errors
       const handleErrors = (e) => {
         console.log("socket error", e);
         toast.error("Socket connection failed, try again");
@@ -48,6 +47,12 @@ const EditorPage = () => {
         if (username !== location.state?.username) {
           toast.success(`${username} joined the room`);
           console.log(`${username} joined with id ${socketId}`);
+          if (codeRef.current) {
+            socket.emit(ACTIONS.SYNC_CODE, {
+              code: codeRef.current,
+              socketId, // send only to new user
+            });
+          }
         }
 
         // Deduplicate clients
@@ -58,12 +63,12 @@ const EditorPage = () => {
       });
 
       //Listening for disconnected
-      socketRef.current.on(ACTIONS.DISCONNECTED, ({socketId, username})=>{
-        toast.success(`${username} left the room`)
-        setClients((prev)=>{
-          return prev.filter(client => client.socketId != socketId)
-        })
-      })
+      socketRef.current.on(ACTIONS.DISCONNECTED, ({ socketId, username }) => {
+        toast.success(`${username} left the room`);
+        setClients((prev) => {
+          return prev.filter((client) => client.socketId != socketId);
+        });
+      });
 
       // Emit join
       socket.emit(ACTIONS.JOIN, {
@@ -77,12 +82,26 @@ const EditorPage = () => {
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
-        socketRef.current.off(ACTIONS.JOINED)
-        socketRef.current.off(ACTIONS.DISCONNECTED)
+        socketRef.current.off(ACTIONS.JOINED);
+        socketRef.current.off(ACTIONS.DISCONNECTED);
         console.log("🔌 Disconnected socket on unmount");
       }
     };
   }, []);
+
+  async function copyRoomId() {
+    try {
+      await navigator.clipboard.writeText(roomId);
+      toast.success("Room ID Copied!");
+    } catch (error) {
+      toast.error("Could not copy Room ID");
+      console.error("Error while copying", error);
+    }
+  }
+
+  function leaveRoom() {
+    reactNavigator("/");
+  }
 
   if (!location.state) {
     return <Navigate to="/" />;
@@ -108,17 +127,23 @@ const EditorPage = () => {
           </div>
         </div>
         <div className="flex flex-col gap-2 bottom-0">
-          <button className="bg-white text-black cursor-pointer border border-black p-[10px] rounded-lg w-[100%] font-bold">
+          <button
+            onClick={copyRoomId}
+            className="bg-white text-black cursor-pointer border border-black p-[10px] rounded-lg w-[100%] font-bold"
+          >
             Copy Room Id
           </button>
-          <button className="text-black bg-[#4aed88] hover:bg-[#2b824c] cursor-pointer border border-black p-[10px] rounded-lg w-[100%] font-bold">
+          <button
+            onClick={leaveRoom}
+            className="text-black bg-[#4aed88] hover:bg-[#2b824c] cursor-pointer border border-black p-[10px] rounded-lg w-[100%] font-bold"
+          >
             Leave
           </button>
         </div>
       </div>
 
       <div>
-        <Editor />
+        <Editor socketRef={socketRef} roomId={roomId} />
       </div>
     </div>
   );

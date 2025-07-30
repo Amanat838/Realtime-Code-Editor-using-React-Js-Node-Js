@@ -34,20 +34,10 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Username already taken" });
       return; // ❌ Stop further execution
     }
-    for (const [socketId, name] of Object.entries(userSocketMap)) {
-      if (name === username) {
-        console.log(
-          `⚠️ Disconnecting old socket ${socketId} for username ${username}`
-        );
-        const oldSocket = io.sockets.sockets.get(socketId);
-        if (oldSocket) oldSocket.disconnect(true);
-        delete userSocketMap[socketId];
-      }
-    }
     userSocketMap[socket.id] = username;
     socket.join(roomId);
     const clients = getAllConnectedClients(roomId);
-    console.log(clients);
+    // console.log(clients);
     io.in(roomId).emit(ACTIONS.JOINED, {
       clients,
       username,
@@ -55,8 +45,18 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on(ACTIONS.CODE_CHANGE, ({ roomId, code }) => {
+    // console.log('Recieving', code)
+    socket.in(roomId).emit(ACTIONS.CODE_CHANGE, { code });
+  });
+
+  
+  socket.on(ACTIONS.SYNC_CODE, ({ socketId, code }) => {
+    io.to(socketId).emit(ACTIONS.CODE_CHANGE, { code });
+  });
+
   socket.on("disconnect", () => {
-    console.log("❌ Disconnected:", socket.id);
+    // console.log("❌ Disconnected:", socket.id);
     const rooms = [...socket.rooms];
     delete userSocketMap[socket.id];
 
@@ -69,17 +69,17 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on('disconnecting', ()=>{
-    const rooms = [...socket.rooms]
-    rooms.forEach((roomId)=>{
-        socket.in(roomId).emit(ACTIONS.DISCONNECTED, {
-            socketId: socket.id,
-            username: userSocketMap[socket.id]
-        })
-    })
-    delete userSocketMap[socket.id]
-    socket.leave()
-  })
+  socket.on("disconnecting", () => {
+    const rooms = [...socket.rooms];
+    rooms.forEach((roomId) => {
+      socket.to(roomId).emit(ACTIONS.DISCONNECTED, {
+        socketId: socket.id,
+        username: userSocketMap[socket.id],
+      });
+    });
+    delete userSocketMap[socket.id];
+    socket.leave();
+  });
 });
 
 const PORT = process.env.PORT || 5000;
